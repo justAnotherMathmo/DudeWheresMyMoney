@@ -1,12 +1,8 @@
 import re
 import requests
 import time
-
-data = {
-    'frmLogin:strCustomerLogin_userID': '',
-    'frmLogin:strCustomerLogin_pwd': ''
-}
-memorable_info = ''
+# Local packages
+import keys
 
 
 def get_token(name: str, content: str) -> str:
@@ -25,7 +21,7 @@ def get_mem_info_positions(content: str) -> list:
     return positions
 
 
-def get_logged_in_session():
+def get_logged_in_session() -> (requests.Session, requests.models.Response):
     # Set up session
     sess = requests.Session()
 
@@ -34,7 +30,11 @@ def get_logged_in_session():
     req1_content = req1.content.decode('utf-8')
 
     # Get hidden tokens on page to
-    data['submitToken'] = get_token('submitToken', req1_content)
+    data = {
+        'submitToken': get_token('submitToken', req1_content),
+        'frmLogin:strCustomerLogin_userID': keys.user_id,
+        'frmLogin:strCustomerLogin_pwd': keys.main_pw
+    }
 
     # Just wait a little bit, because web servers don't like you hammering them
     time.sleep(2)
@@ -48,8 +48,7 @@ def get_logged_in_session():
              }
 
     for i, mem_pos in enumerate(get_mem_info_positions(req2_content)):
-        data2[f'frmentermemorableinformation1:strEnterMemorableInformation_memInfo{i+1}'] = '&nbsp;' + memorable_info[
-            mem_pos]
+        data2[f'frmentermemorableinformation1:strEnterMemorableInformation_memInfo{i+1}'] = '&nbsp;' + keys.mem_info[mem_pos]
 
     # Just wait a little bit, because web servers don't like you hammering them
     time.sleep(2)
@@ -62,4 +61,3 @@ def get_logged_in_session():
 
 if __name__ == '__main__':
     session, main_page = get_logged_in_session()
-    
