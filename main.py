@@ -1,8 +1,20 @@
+# Native Python imports
+import datetime as dt
+from io import StringIO
 import re
 import requests
 import time
+# 3rd Party Packages
+import pandas as pd
 # Local packages
 import keys
+
+base_url_insecure = r'https://online.lloydsbank.co.uk'
+base_url_secure = r'https://secure.lloydsbank.co.uk'
+
+
+def _sleep():
+    time.sleep(2)
 
 
 def get_token(name: str, content: str) -> str:
@@ -10,7 +22,7 @@ def get_token(name: str, content: str) -> str:
 
 
 def pprint_req(req: requests.models.Response) -> None:
-    print(req.content.decode('utf-8'))
+    print(req.text)
 
 
 def get_mem_info_positions(content: str) -> list:
@@ -26,7 +38,7 @@ def get_logged_in_session() -> (requests.Session, requests.models.Response):
     sess = requests.Session()
 
     # Get the first log in page
-    req1 = sess.get(r'https://online.lloydsbank.co.uk/personal/logon/login.jsp')
+    req1 = sess.get(base_url_insecure + r'/personal/logon/login.jsp')
     req1_content = req1.content.decode('utf-8')
 
     # Get hidden tokens on page to
@@ -37,10 +49,10 @@ def get_logged_in_session() -> (requests.Session, requests.models.Response):
     }
 
     # Just wait a little bit, because web servers don't like you hammering them
-    time.sleep(2)
+    _sleep()
 
     # Log in past page one, and get the "memorable information page"
-    req2 = sess.post(r'https://online.lloydsbank.co.uk/personal/primarylogin', data=data)
+    req2 = sess.post(base_url_insecure + r'/personal/primarylogin', data=data)
     req2_content = req2.content.decode('utf-8')
     data2 = {'submitToken': get_token('submitToken', req2_content),
              'frmentermemorableinformation1': 'frmentermemorableinformation1',
@@ -51,13 +63,72 @@ def get_logged_in_session() -> (requests.Session, requests.models.Response):
         data2[f'frmentermemorableinformation1:strEnterMemorableInformation_memInfo{i+1}'] = '&nbsp;' + keys.mem_info[mem_pos]
 
     # Just wait a little bit, because web servers don't like you hammering them
-    time.sleep(2)
+    _sleep()
 
     # Log in past memorable information page? (doesn't work yet)
-    req3 = sess.post(r'https://secure.lloydsbank.co.uk/personal/a/logon/entermemorableinformation.jsp', data=data2)
+    req3 = sess.post(base_url_secure + r'/personal/a/logon/entermemorableinformation.jsp', data=data2)
+
+    try:
+        assert '<title>Lloyds Bank - Personal Account Overview</title>' in req3.text
+    except AssertionError:
+        raise AssertionError('Something\'s gone wrong and we\'re not in the main page...')
 
     return sess, req3
 
 
+def get_all_accounts(main_page_text: str) -> list:
+    return re.findall('<a id="lnkAccName[a-zA-Z0-9-_]*"\s*href="(.*?)"\s*title=".*?"\s*data-wt-ac="(.*?)"', main_page_text)
+
+
+def dl_csv(session: requests.Session, page_text: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+    # First ensure we're not looking over too many days
+    num_days = (end - start).days
+    if num_days > 364:
+        # Split range if longer than a year
+        midpoint = start + (end - start) / 2
+        return pd.concat([
+            dl_csv(session, page_text, start, midpoint),
+            dl_csv(session, page_text, midpoint + dt.timedelta(1), end),
+        ])
+
+    # form_http = re.search('<form id="accStatement:export-statement-form.*?<.form>', page_text, flags=re.DOTALL)[0]
+    # req = session.post(base_url_secure + r'/personal/a/viewproductdetails/viewproductdetailsdesktopress.js',
+    req = session.get(base_url_secure + r'/personal/a/viewproductdetails/ress/m44_exportstatement_fallback.jsp')
+    # req = session.post(base_url_secure + r'/personal/a/viewproductdetails/viewproductdetailsdesktopress.js',
+    _sleep()
+    req = session.post(base_url_secure + r'/personal/a/viewproductdetails/ress/m44_exportstatement_fallback.jsp',
+                       data={
+                           # 'exportDateRange': 'between',
+                           'exportDateRangeBetween': 'between',
+                           # 'searchDateFrom': start.strftime('%d/%m/%Y'),
+                           'export-date-range-from':  start.strftime('%d/%m/%Y'),
+                           # 'searchDateFromTo': end.strftime('%d/%m/%Y'),
+                           'export-date-range-to':    end.strftime('%d/%m/%Y'),
+                           'export-format': 'Internet banking text/spreadsheet (.CSV)',
+                           'submitToken': get_token('submitToken', req.text),
+                           'export-statement-form': 'export-statement-form',
+                           # 'accStatement:export-statement-form': 'accStatement:export-statement-form',
+                           # 'export-statement-form:btnQuickTransferRetail': 'Export'
+                           'export-statement-form:btnQuickTransferRetail': 'Export'
+                       })
+
+    # In case we're dling lots of csvs
+    _sleep()
+    return pd.read_csv(StringIO(req.text))
+
+
 if __name__ == '__main__':
     session, main_page = get_logged_in_session()
+
+    accounts = get_all_accounts(main_page.text)
+
+    print(accounts)
+
+    for url_end, acc in accounts:
+        url = base_url_secure + url_end
+
+        account_page = session.get(url)
+        print(account_page.text)
+        print('=========================================\n' * 10)
+        print(dl_csv(session, account_page.text, dt.date(2018, 1, 1), dt.date(2018, 3, 1)))
+        break
