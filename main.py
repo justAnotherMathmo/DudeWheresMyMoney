@@ -6,14 +6,18 @@ import requests
 import time
 # 3rd Party Packages
 import pandas as pd
+import matplotlib.pyplot as plt
 # Local packages
 import keys
 
 base_url_insecure = r'https://online.lloydsbank.co.uk'
 base_url_secure = r'https://secure.lloydsbank.co.uk'
+start_date = dt.date(2018, 1, 1)
+end_date = dt.date(2018, 5, 1)
+download_days_at_once = 30
 
 
-def _sleep():
+def _sleep() -> None:
     time.sleep(2)
 
 
@@ -83,8 +87,8 @@ def get_all_accounts(main_page_text: str) -> list:
 def dl_csv(session: requests.Session, page_text: str, start: dt.date, end: dt.date) -> pd.DataFrame:
     # First ensure we're not looking over too many days
     num_days = (end - start).days
-    if num_days > 30:
-        # Split range if longer than a month, as too many transactions makes Lloyds sad
+    if num_days > download_days_at_once:
+        # Split range if too long, as too many transactions makes Lloyds sad
         midpoint = start + (end - start) / 2
         return pd.concat([
             dl_csv(session, page_text, start, midpoint),
@@ -128,12 +132,17 @@ if __name__ == '__main__':
 
     accounts = get_all_accounts(main_page.text)
 
-    print(accounts)
+    print('Accounts:  ', [a[1] for a in accounts])
 
+    account_data = {}
     for url_end, acc in accounts:
         url = base_url_secure + url_end
 
         account_page = session.get(url)
         # print(account_page.text)
         # print('=========================================\n' * 10)
-        print(dl_csv(session, account_page.text, dt.date(2018, 1, 1), dt.date(2018, 5, 1)))
+        account_data[acc] = dl_csv(session, account_page.text, start_date, end_date)
+        account_data[acc]['Account'] = acc
+
+    data = pd.concat([account_data[acc] for acc in account_data]).sort_values('Transaction Date').reset_index(drop=True)
+    print(data)
