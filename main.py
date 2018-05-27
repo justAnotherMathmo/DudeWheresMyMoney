@@ -84,37 +84,28 @@ def get_all_accounts(main_page_text: str) -> list:
     return re.findall('<a id="lnkAccName[a-zA-Z0-9-_]*"\s*href="(.*?)"\s*title=".*?"\s*data-wt-ac="(.*?)"', main_page_text)
 
 
-def dl_csv(session: requests.Session, page_text: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+def dl_csv(session: requests.Session, start: dt.date, end: dt.date) -> pd.DataFrame:
     # First ensure we're not looking over too many days
     num_days = (end - start).days
     if num_days > download_days_at_once:
         # Split range if too long, as too many transactions makes Lloyds sad
         midpoint = start + (end - start) / 2
         return pd.concat([
-            dl_csv(session, page_text, start, midpoint),
-            dl_csv(session, page_text, midpoint + dt.timedelta(1), end),
+            dl_csv(session, start, midpoint),
+            dl_csv(session, midpoint + dt.timedelta(1), end),
         ]).reset_index(drop=True)
 
-    # form_http = re.search('<form id="accStatement:export-statement-form.*?<.form>', page_text, flags=re.DOTALL)[0]
-    # req = session.post(base_url_secure + r'/personal/a/viewproductdetails/viewproductdetailsdesktopress.js',
     req = session.get(base_url_secure + r'/personal/a/viewproductdetails/ress/m44_exportstatement_fallback.jsp')
-    # req = session.post(base_url_secure + r'/personal/a/viewproductdetails/viewproductdetailsdesktopress.js',
     _sleep()
+
     req = session.post(base_url_secure + r'/personal/a/viewproductdetails/ress/m44_exportstatement_fallback.jsp',
                        data={
-                           # 'exportDateRange': 'between',
                            'exportDateRange': 'between',
                            'searchDateFrom': start.strftime('%d/%m/%Y'),
-                           # 'export-date-range-from':  start.strftime('%d/%m/%Y'),
-                           # 'from':  start.strftime('%d/%m/%Y'),
                            'searchDateTo': end.strftime('%d/%m/%Y'),
-                           # 'export-date-range-to':    end.strftime('%d/%m/%Y'),
-                           # 'to':    end.strftime('%d/%m/%Y'),
                            'export-format': 'Internet banking text/spreadsheet (.CSV)',
                            'submitToken': get_token('submitToken', req.text),
                            'export-statement-form': 'export-statement-form',
-                           # 'accStatement:export-statement-form': 'accStatement:export-statement-form',
-                           # 'export-statement-form:btnQuickTransferRetail': 'Export'
                            'export-statement-form:btnQuickTransferRetail': 'Export'
                        })
 
@@ -139,9 +130,7 @@ if __name__ == '__main__':
         url = base_url_secure + url_end
 
         account_page = session.get(url)
-        # print(account_page.text)
-        # print('=========================================\n' * 10)
-        account_data[acc] = dl_csv(session, account_page.text, start_date, end_date)
+        account_data[acc] = dl_csv(session, start_date, end_date)
         account_data[acc]['Account'] = acc
 
     data = pd.concat([account_data[acc] for acc in account_data]).sort_values('Transaction Date').reset_index(drop=True)
